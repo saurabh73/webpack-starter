@@ -1,0 +1,20 @@
+@import 'components/theme';
+@import 'components/fonts';
+
+body {
+  padding-top: 54px;
+}
+  
+@media (min-width: 992px) { 
+  body {
+    padding-top: 56px;
+  }
+}
+
+.font-caviar {
+  font-family: "CaviarDreams";
+}
+
+.font-kiona {
+  font-family: "Kiona";
+}
