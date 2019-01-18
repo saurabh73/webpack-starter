@@ -1,93 +1,103 @@
 const path = require('path');
-const ExtractTextPlugin = require('extract-text-webpack-plugin');
+const webpack = require('webpack');
+const glob = require('glob');
+/* Webpack Plugins */
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CleanWebpackPlugin = require('clean-webpack-plugin');
-const webpack = require('webpack');
-const isProd = process.env.NODE_ENV === 'production';
-const extractPlugin = new ExtractTextPlugin({
-  filename: 'styles/main.css',
-  disable: !isProd,
-});
-const cssDev = [
-  {
-    // translates CSS into CommonJS modules
-    loader: 'css-loader',
-    options: {
-      sourceMap: true,
-    },
-  },
-  {
-    // resolves url
-    loader: 'resolve-url-loader',
-    options: {
-      sourceMap: true,
-    },
-  },
-  {
-    // compiles Sass to CSS
-    loader: 'sass-loader',
-    options: {
-      sourceMap: true,
-    },
-  },
-];
+const UglifyJsPlugin = require('uglifyjs-webpack-plugin');
+const OptimizeCSSAssetsPlugin = require('optimize-css-assets-webpack-plugin');
+const PreloadWebpackPlugin = require('preload-webpack-plugin');
+const CssUrlRelativePlugin = require('css-url-relative-plugin');
+const PurgeCssPlugin = require('purgecss-webpack-plugin');
+const AutoPrefixer = require('autoprefixer');
 
-const cssProd = extractPlugin.extract({
-  fallback: 'style-loader',
-  use: cssDev,
+/* Environment */
+const IS_DEV = process.env.NODE_ENV !== 'production';
+
+const pages = ['index', 'about'];
+
+const entryHtmlPlugins = pages.map(page => {
+  return new HtmlWebpackPlugin({
+    filename: `${page}.html`,
+    template: `src/${page}.html`,
+    favicon: path.resolve(__dirname, './src/favicon.ico'),
+    minify: !IS_DEV && {
+      collapseWhitespace: true,
+      preserveLineBreaks: true,
+      removeComments: true,
+    },
+  });
 });
 
-const cssConfig = isProd ? cssProd : cssDev;
-module.exports = {
+const config = {
+  mode: IS_DEV ? 'development' : 'production',
+  devtool: !IS_DEV ? 'eval' : 'source-map',
   entry: {
-    main: ['./src/scripts/script.js', './src/styles/main.scss'],
+    main: ['./src/scripts/script.js', './src/styles/style.scss'],
   },
   output: {
+    filename: 'scripts/[name].[hash].js',
     path: path.resolve(__dirname, 'dist'),
-    filename: 'bundle.js',
   },
-  devtool: 'source-map',
   devServer: {
-    contentBase: path.join(__dirname, 'dist'),
-    historyApiFallback: {
-      rewrites: [
-        {
-          from: /.*/,
-          to: path.join((path.join(__dirname), 'dist'), 'index.html'),
-        },
-      ],
-    },
-    inline: true,
-    hot: true,
-    compress: true,
-    open: true,
-    port: 8000,
+    contentBase: path.join(__dirname, 'src'),
   },
   module: {
     rules: [
       {
         test: /\.js$/,
+        exclude: /node_modules/,
+        loader: 'babel-loader',
+      },
+      {
+        test: /\.scss$/,
         use: [
+          IS_DEV ? 'style-loader' : MiniCssExtractPlugin.loader,
+          { loader: 'css-loader', options: { sourceMap: IS_DEV } },
           {
-            loader: 'babel-loader',
+            loader: 'postcss-loader',
             options: {
-              presets: ['es2015'],
+              ident: 'postcss',
+              plugins: [
+                AutoPrefixer({
+                  browsers: ['> 1%', 'last 2 versions'],
+                }),
+              ],
+            },
+          },
+          { loader: 'sass-loader', options: { sourceMap: IS_DEV } },
+        ],
+      },
+      {
+        test: /\.css$/,
+        use: [
+          IS_DEV ? 'style-loader' : MiniCssExtractPlugin.loader,
+          { loader: 'css-loader', options: { sourceMap: IS_DEV } },
+          {
+            loader: 'postcss-loader',
+            options: {
+              ident: 'postcss',
+              plugins: [
+                AutoPrefixer({
+                  browsers: ['> 1%', 'last 2 versions'],
+                }),
+              ],
             },
           },
         ],
       },
       {
-        test: /\.scss$/,
-        use: cssConfig,
-      },
-      {
         test: /\.(png|jpg|jpeg|gif|svg)$/,
-        loader: 'url-loader',
-        options: {
-          limit: 8192,
-          name: '[name].[ext]',
-          outputPath: 'assets/images/',
-          publicPath: 'assets/images/',
+        use: {
+          loader: 'url-loader',
+          options: {
+            limit: 8192,
+            name: '[name].[ext]',
+            fallback: 'file-loader',
+            outputPath: 'assets/images/',
+            publicPath: 'assets/images/',
+          },
         },
       },
       {
@@ -112,18 +122,68 @@ module.exports = {
       },
       {
         test: /\.html$/,
-        use: ['html-loader'],
+        use: [
+          {
+            loader: 'html-loader',
+            options: {
+              minimize: !IS_DEV,
+            },
+          },
+        ],
       },
     ],
   },
   plugins: [
-    extractPlugin,
-    new HtmlWebpackPlugin({
-      template: 'src/index.html',
-    }),
     new CleanWebpackPlugin(['dist']),
+    new webpack.ProvidePlugin({
+      $: 'jquery',
+      jQuery: 'jquery',
+      'windows.jQuery': 'jquery',
+    }),
+    new MiniCssExtractPlugin({
+      filename: IS_DEV
+        ? 'styles/[name].css'
+        : 'styles/[name].[contenthash].css',
+      chunkFilename: 'styles/[name]-[contenthash]-[id].css',
+    }),
+    new PreloadWebpackPlugin({
+      include: 'initial',
+    }),
+    new PurgeCssPlugin({
+      paths: glob.sync(path.resolve(__dirname, 'src') + '/**/*', {
+        nodir: true,
+      }),
+    }),
+    new CssUrlRelativePlugin(),
+    new webpack.HashedModuleIdsPlugin(),
     new webpack.NamedModulesPlugin(),
     new webpack.HotModuleReplacementPlugin(),
     new webpack.NoEmitOnErrorsPlugin(),
-  ],
+  ].concat(entryHtmlPlugins),
+  optimization: {
+    runtimeChunk: 'single',
+    splitChunks: {
+      cacheGroups: {
+        vendor: {
+          test: /node_modules/,
+          chunks: 'initial',
+          name: 'vendor',
+          priority: 10,
+          enforce: true,
+        },
+      },
+    },
+    minimizer: [],
+  },
 };
+
+if (!IS_DEV) {
+  config.optimization.minimizer.push(
+    new UglifyJsPlugin({
+      sourceMap: false,
+    }),
+    new OptimizeCSSAssetsPlugin({})
+  );
+}
+
+module.exports = config;
